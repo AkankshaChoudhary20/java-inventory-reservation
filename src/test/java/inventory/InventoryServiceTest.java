@@ -13,6 +13,7 @@ public final class InventoryServiceTest {
 
     public static void main(String[] args) throws Exception {
         int failures = 0;
+        failures += runTest("testConfirmRejectsExpiredReservation", InventoryServiceTest::testConfirmRejectsExpiredReservation);
         failures += runTest("testReserveConfirm", InventoryServiceTest::testReserveConfirm);
         failures += runTest("testReserveInsufficientStock", InventoryServiceTest::testReserveInsufficientStock);
         failures += runTest("testReleaseReturnsStock", InventoryServiceTest::testReleaseReturnsStock);
@@ -27,6 +28,22 @@ public final class InventoryServiceTest {
             System.exit(1);
         }
         System.out.println("\nALL TESTS PASSED");
+    }
+
+    static void testConfirmRejectsExpiredReservation() {
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(1000);
+        InventoryService service = new InventoryService(1000, now::get);
+        service.addStock("sku", 1);
+        String expired = service.reserve("sku", 1).reservationId;
+        now.set(2000);
+        assertTrue(!service.confirm(expired), "expired reservation must not become a sale");
+        assertEquals(1, service.availableStock("sku"), "expired stock returned immediately");
+        assertEquals(0, service.totalSold(), "expired confirmation cannot increment sales");
+        assertTrue(!service.confirm(expired), "expired reservation cannot be finalized twice");
+        assertEquals(1, service.availableStock("sku"), "stock must not be returned twice");
+        String valid = service.reserve("sku", 1).reservationId;
+        now.set(2999);
+        assertTrue(service.confirm(valid), "reservation remains valid before its deadline");
     }
 
     private interface FallibleTest {

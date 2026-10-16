@@ -2,6 +2,7 @@ package inventory;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -26,9 +27,15 @@ public final class InventoryService {
     private final Map<String, Reservation> reservations = new ConcurrentHashMap<>();
     private final AtomicInteger totalSold = new AtomicInteger(0);
     private final long reservationTtlMillis;
+    private final LongSupplier clock;
 
     public InventoryService(long reservationTtlMillis) {
+        this(reservationTtlMillis, System::currentTimeMillis);
+    }
+
+    InventoryService(long reservationTtlMillis, LongSupplier clock) {
         this.reservationTtlMillis = reservationTtlMillis;
+        this.clock = clock;
     }
 
     public void addStock(String sku, int quantity) {
@@ -95,7 +102,7 @@ public final class InventoryService {
         }
 
         String id = UUID.randomUUID().toString();
-        long expiresAt = System.currentTimeMillis() + reservationTtlMillis;
+        long expiresAt = clock.getAsLong() + reservationTtlMillis;
         reservations.put(id, new Reservation(id, sku, quantity, expiresAt));
         return ReservationResult.ok(id);
     }
@@ -107,6 +114,10 @@ public final class InventoryService {
     public boolean confirm(String reservationId) {
         Reservation r = reservations.remove(reservationId);
         if (r == null) {
+            return false;
+        }
+        if (r.isExpired(clock.getAsLong())) {
+            stock.get(r.sku).addAndGet(r.quantity);
             return false;
         }
         totalSold.addAndGet(r.quantity);
@@ -128,7 +139,7 @@ public final class InventoryService {
      * confirmed or released. Returns how many were reclaimed.
      */
     public int sweepExpired() {
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         int reclaimed = 0;
         for (Reservation r : reservations.values()) {
             if (r.isExpired(now) && reservations.remove(r.id, r)) {
